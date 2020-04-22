@@ -20,5 +20,4 @@ terraform {
       name = "demo"
     }
   }
-
 }
