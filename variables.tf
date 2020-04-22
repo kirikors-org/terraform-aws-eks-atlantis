@@ -198,3 +198,8 @@ variable "atlantis_github_secret" {
   type        = string
   description = "Webhook secret for the GitHub repository monitored by Atlantis"
 }
+
+variable "atlantis_tfe_token" {
+  type        = string
+  description = "Terraform cloud token for Atlantis"
+}

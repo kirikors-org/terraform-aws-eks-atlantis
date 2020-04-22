@@ -242,9 +242,19 @@ resource "helm_release" "atlantis" {
     value = var.atlantis_github_secret
   }
 
+  set_sensitive {
+    name  = "environment.ATLANTIS_TFE_TOKEN"
+    value = var.atlantis_tfe_token
+  }
+
   set {
     name  = "orgWhitelist"
     value = join("/", ["github.com", var.atlantis_github_repo_org, var.atlantis_github_repo_name])
+  }
+
+  set {
+    name  = "ingress.path"
+    value = "/*"
   }
 
   set_string {

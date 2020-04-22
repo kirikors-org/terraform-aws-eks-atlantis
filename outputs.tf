@@ -147,3 +147,8 @@ output "atlantis_alb_hostname" {
   description = "Hostname of the ALB exposing Atlantis via k8s ingress"
   value       = data.aws_lb.alb_ingress.dns_name
 }
+
+output "atlantis_webhooks_endpoint" {
+  description = "Endpoint for Atlantis webhooks"
+  value       = join("", ["http://", data.aws_lb.alb_ingress.dns_name, "/events"])
+}
