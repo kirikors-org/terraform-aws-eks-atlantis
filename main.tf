@@ -266,7 +266,6 @@ resource "helm_release" "atlantis" {
     name  = "ingress.annotations.alb\\.ingress\\.kubernetes\\.io/scheme"
     value = "internet-facing"
   }
-
 }
 
 # fetch ingress URL for Atlantis when available
