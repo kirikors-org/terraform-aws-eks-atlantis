@@ -19,8 +19,8 @@ output "vpc_main_route_table_id" {
 }
 
 output "vpc_public_subnet_cidrs" {
-  value       = module.subnets.az_subnet_ids
-  description = "Map of AZ names to subnet IDs"
+  value       = module.subnets.public_subnet_ids
+  description = "Public subnet IDs"
 }
 
 output "eks_cluster_security_group_id" {
@@ -143,7 +143,7 @@ output "workers_role_arn" {
   value       = module.eks_workers.workers_role_arn
 }
 
-output "workers_role_name" {
-  description = "Name of the worker nodes IAM role"
-  value       = module.eks_workers.workers_role_name
+output "atlantis_alb_hostname" {
+  description = "Hostname of the ALB exposing Atlantis via k8s ingress"
+  value       = data.aws_lb.alb_ingress.dns_name
 }

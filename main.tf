@@ -18,7 +18,7 @@ locals {
   # The usage of the specific kubernetes.io/cluster/* resource tags below are required
   # for EKS and Kubernetes to discover and manage networking resources
   # https://www.terraform.io/docs/providers/aws/guides/eks-getting-started.html#base-vpc-networking
-  tags = merge(module.label.tags, map("kubernetes.io/cluster/${module.label.id}", "shared"))
+  tags = merge(module.label.tags, map("kubernetes.io/cluster/${module.label.id}-cluster", "shared"))
 
   # Unfortunately, most_recent (https://github.com/cloudposse/terraform-aws-eks-workers/blob/34a43c25624a6efb3ba5d2770a601d7cb3c0d391/main.tf#L141)
   # variable does not work as expected, if you are not going to use custom ami you should
@@ -43,19 +43,25 @@ module "vpc" {
 
 # create public subnets in specified AZs
 module "subnets" {
-  source              = "git::https://github.com/cloudposse/terraform-aws-multi-az-subnets.git?ref=tags/0.4.0"
+  source              = "git::https://github.com/cloudposse/terraform-aws-dynamic-subnets.git?ref=tags/0.19.0"
   namespace           = var.namespace
   stage               = var.stage
   name                = var.name
   attributes          = var.attributes
   availability_zones  = var.availability_zones
-  type                = var.subnet_type
-  max_subnets         = var.max_subnets
+  max_subnet_count    = var.max_subnets
   vpc_id              = module.vpc.vpc_id
   igw_id              = module.vpc.igw_id
   cidr_block          = module.vpc.vpc_cidr_block
   nat_gateway_enabled = false
   tags                = local.tags
+
+  private_subnets_additional_tags = {
+    "kubernetes.io/role/internal-elb" = 1
+  }
+  public_subnets_additional_tags = {
+    "kubernetes.io/role/elb" = 1
+  }
 }
 
 # fetch current AWS accountId to use for IAM roles designated for K8S
@@ -99,17 +105,19 @@ module "eks_workers" {
   attributes                         = var.attributes
   tags                               = var.tags
   instance_type                      = var.instance_type
+  associate_public_ip_address        = true
   eks_worker_ami_name_filter         = local.eks_worker_ami_name_filter
   vpc_id                             = module.vpc.vpc_id
-  subnet_ids                         = values(module.subnets.az_subnet_ids)
+  subnet_ids                         = module.subnets.public_subnet_ids
   health_check_type                  = var.health_check_type
   min_size                           = var.min_size
   max_size                           = var.max_size
   wait_for_capacity_timeout          = var.wait_for_capacity_timeout
-  cluster_name                       = module.label.id
+  cluster_name                       = module.eks_cluster.eks_cluster_id
   cluster_endpoint                   = module.eks_cluster.eks_cluster_endpoint
   cluster_certificate_authority_data = module.eks_cluster.eks_cluster_certificate_authority_data
   cluster_security_group_id          = module.eks_cluster.security_group_id
+  bootstrap_extra_args               = "--node-labels=purpose=ci-worker"
 
   # Auto-scaling policies and CloudWatch metric alarms
   autoscaling_policies_enabled           = var.autoscaling_policies_enabled
@@ -127,7 +135,7 @@ module "eks_cluster" {
   tags                         = var.tags
   region                       = var.region
   vpc_id                       = module.vpc.vpc_id
-  subnet_ids                   = values(module.subnets.az_subnet_ids)
+  subnet_ids                   = module.subnets.public_subnet_ids
   kubernetes_version           = var.kubernetes_version
   local_exec_interpreter       = var.local_exec_interpreter
   oidc_provider_enabled        = var.oidc_provider_enabled
@@ -183,9 +191,23 @@ resource "kubernetes_cluster_role_binding" "readers" {
   }
 }
 
-# deploy Atlantis application with helm
+# deploy ELB-based ingress controller
+module "alb_ingress_controller" {
+  source  = "iplabs/alb-ingress-controller/kubernetes"
+  version = "3.1.0"
+
+  k8s_cluster_type = "eks"
+  k8s_namespace    = "kube-system"
+
+  aws_region_name  = var.region
+  k8s_cluster_name = module.eks_cluster.eks_cluster_id
+}
+
+# tag public subnets so that k8s knows to use them for external load balancers
+
+
+# deploy Atlantis application with Helm
 provider "helm" {
-  install_tiller = true
   kubernetes {
     host                   = data.aws_eks_cluster.main.endpoint
     cluster_ca_certificate = base64decode(data.aws_eks_cluster.main.certificate_authority.0.data)
@@ -201,9 +223,9 @@ data "helm_repository" "stable" {
 
 resource "helm_release" "atlantis" {
   name       = var.atlantis_helm_release_name
-  repository = data.helm_repository.stable.metadata[0].name
+  repository = data.helm_repository.stable.url
   chart      = "atlantis"
-  version    = "0.11.1"
+  version    = "3.11.1"
 
   set_sensitive {
     name  = "github.user"
@@ -222,6 +244,47 @@ resource "helm_release" "atlantis" {
 
   set {
     name  = "orgWhitelist"
-    value = var.atlantis_github_repo
+    value = join("/", ["github.com", var.atlantis_github_repo_org, var.atlantis_github_repo_name])
   }
+
+  set_string {
+    name  = "ingress.annotations.kubernetes\\.io/ingress\\.class"
+    value = "alb"
+  }
+
+  set_string {
+    name  = "ingress.annotations.alb\\.ingress\\.kubernetes\\.io/scheme"
+    value = "internet-facing"
+  }
+
+}
+
+# fetch ingress URL for Atlantis when available
+data "aws_lb" "alb_ingress" {
+  tags = {
+    name  = "kubernetes.io/ingress-name"
+    value = "atlantis"
+  }
+  depends_on = [module.alb_ingress_controller, helm_release.atlantis]
+}
+
+# 3. create a webhook in the target GitHub repo for atlantis
+provider "github" {
+  organization = var.atlantis_github_repo_org
+}
+
+resource "github_repository_webhook" "atlantis" {
+  repository = var.atlantis_github_repo_name
+  configuration {
+    url          = join("", ["http://", data.aws_lb.alb_ingress.dns_name, "/events"])
+    content_type = "application/json"
+    insecure_ssl = false
+    secret       = var.atlantis_github_secret
+  }
+  events = [
+    "issue_comment",
+    "pull_request",
+    "pull_request_review",
+    "pull_request_review_comment"
+  ]
 }

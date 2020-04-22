@@ -7,7 +7,8 @@ terraform {
     null       = "~> 2.0"
     local      = "~> 1.3"
     kubernetes = "~> 1.11"
-    helm       = "~> 0.9"
+    helm       = "~> 1.0"
+    github     = "~> 2.6"
   }
 
   # remote state required for atlantis

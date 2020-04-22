@@ -166,7 +166,7 @@ variable "health_check_type" {
   default     = "EC2"
 }
 
-# parameters for Atlantis helm charts
+# parameters for Atlantis and target GitHub repo
 
 variable "atlantis_helm_release_name" {
   type        = string
@@ -174,9 +174,14 @@ variable "atlantis_helm_release_name" {
   default     = "atlantis"
 }
 
-variable "atlantis_github_repo" {
+variable "atlantis_github_repo_org" {
   type        = string
-  description = "GitHub repository to whitelist for Atlantis"
+  description = "GitHub organization for Atlantis target repo whitelist"
+}
+
+variable "atlantis_github_repo_name" {
+  type        = string
+  description = "GitHub repository name for Atlantis target repo whitelist"
 }
 
 variable "atlantis_github_user" {
